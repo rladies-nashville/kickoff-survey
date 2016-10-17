@@ -1,14 +1,15 @@
 ---
 title: "R-Ladies Nashville Kickoff Survey"
 output:
+  html_notebook:
+    code_folding: hide
   html_document:
-    toc: true
-    toc_float: true
-  html_notebook: default
+    toc: yes
+    toc_float: yes
 ---
 
 ```{r knitrsetup}
-knitr::opts_chunk$set(message = FALSE, warning = FALSE, echo = FALSE)
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
 ```
 
 Thank you all for your input! Below is a summary of responses from the R-Ladies Nashville kickoff
