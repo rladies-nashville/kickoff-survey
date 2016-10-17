@@ -1,0 +1,212 @@
+---
+title: "R-Ladies Nashville Kickoff Survey"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+  html_notebook: default
+---
+
+```{r knitrsetup}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE, echo = FALSE)
+```
+
+Thank you all for your input! Below is a summary of responses from the R-Ladies Nashville kickoff
+survey.
+
+```{r datamgmt, message = FALSE}
+library(tidyverse)
+library(shades)
+library(pander)
+
+## This R script has an API token in it, so it stays secret. Sssshhh. #goodpractice
+source('export_kickoff_data.R')
+
+## REDCap uses so many underscores, y'all
+names(kickoff_data) <- gsub('_+', '_', names(kickoff_data))
+
+## -- Variable renaming and creation ----------------------------------------------------------------
+kickoff_data <- kickoff_data %>%
+  ## Rename REDCap checkbox variables to be easier to work with
+  rename(any_lunch = meeting_times_0,
+         any_hh = meeting_times_1,
+         any_evening = meeting_times_2,
+         mon_lunch = which_weekdays_1,
+         tues_lunch = which_weekdays_2,
+         wed_lunch = which_weekdays_3,
+         thurs_lunch = which_weekdays_4,
+         fri_lunch = which_weekdays_5,
+         mon_pm = which_weeknights_1,
+         tues_pm = which_weeknights_2,
+         wed_pm = which_weeknights_3,
+         thurs_pm = which_weeknights_4,
+         fri_pm = which_weeknights_5,
+         sat_am = meeting_times_3,
+         sat_pm = meeting_times_4,
+         sun_pm = meeting_times_5,
+         first_mtg_social = first_meeting_topic_1,
+         first_mtg_intro = first_meeting_topic_2,
+         first_mtg_pkg = first_meeting_topic_3,
+         first_mtg_stem = first_meeting_topic_4,
+         first_mtg_other = first_meeting_topic_5) %>%
+  ## Factor for whether participant able to meet neither, both, or one of two evening times
+  mutate(evening_time = factor(ifelse(!any_hh & !any_evening, 1,
+                               ifelse(any_hh & any_evening, 2,
+                               ifelse(any_hh, 3,
+                               ifelse(any_evening, 4, NA)))),
+                               levels = 1:4,
+                               labels = c('Neither', 'Either', 'Happy hour only', 'Evening only')))
+
+```
+
+## Meeting Times
+
+```{r meetingtimes}
+## -- Data management for plotting -----------------------------------------------------------------
+meeting_times <- kickoff_data %>%
+  ## Only deal with meeting time variables
+  select(participant_id, evening_time, sat_am:fri_pm) %>%
+  ## Turn into long format
+  gather(key = day_time, value = yn, sat_am:fri_pm) %>%
+  ## Get separate variables for day, time (lunch, evening, am, pm)
+  separate(day_time, into = c('day_week', 'time_day')) %>%
+  ## Create factor variables for plotting
+  mutate(## Day of the week: M-F, just day names; weekend options need to have time added
+         dayvar = factor(ifelse(day_week == 'sat' & time_day == 'am', 1,
+                         ifelse(day_week == 'sat' & time_day == 'pm', 2,
+                         ifelse(day_week == 'sun', 3,
+                         ifelse(day_week == 'mon', 4,
+                         ifelse(day_week == 'tues', 5,
+                         ifelse(day_week == 'wed', 6,
+                         ifelse(day_week == 'thurs', 7,
+                         ifelse(day_week == 'fri', 8, NA)))))))),
+                         levels = 1:8,
+                         labels = c('Sat AM', 'Sat PM', 'Sun PM', 'Mon', 'Tues', 'Wed',
+                                    'Thurs', 'Fri')),
+         ## Facets: lunch, evening, weekend
+         facet_time = factor(ifelse(day_week %in% c('sat', 'sun'), 3,
+                             ifelse(time_day == 'pm', 2, 1)),
+                             levels = 1:3, labels = c('Lunch', 'Evening', 'Weekend')),
+         ## Color by facet and, for evening, whether participants can do both times or just one
+         color_scheme = factor(ifelse(facet_time == 'Lunch', 1,
+                               ifelse(facet_time == 'Evening' & evening_time == 'Either', 2,
+                               ifelse(facet_time == 'Evening' & evening_time == 'Happy hour only', 3,
+                               ifelse(facet_time == 'Evening' & evening_time == 'Evening only', 4,
+                               ifelse(facet_time == 'Weekend', 5, NA))))),
+                               labels = c('Lunch', 'Can do either evening time',
+                                          'Happy hour only', 'Later evening only', 'Weekend'))) %>%
+  filter(yn == 1)
+
+## -- Create barchart -------------------------------------------------------------------------------
+ggplot(data = meeting_times, aes(x = dayvar)) +
+  facet_wrap(~ facet_time, nrow = 1, scales = 'free_x') +
+  geom_bar(aes(y = ..count.., fill = factor(color_scheme)), alpha = 0.8) +
+  scale_x_discrete(name = '') +
+  scale_y_continuous(limits = c(0, nrow(kickoff_data)),
+                     breaks = seq(0, nrow(kickoff_data), 5),
+                     name = 'Count') +
+  scale_fill_manual(name = 'Availability',
+                    values = c('red' %>% brightness(0.7) %>% saturation(1),
+                               gradient(c('darkgreen', 'yellow'), 3),
+                               'blue' %>% brightness(0.7) %>% saturation(1))) +
+  ggtitle(paste('General Meetup Availability, out of', nrow(kickoff_data), 'Respondents')) +
+  theme(plot.title = element_text(hjust = 0),
+        axis.text = element_text(size = 8),
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 7))
+
+```
+
+# Preferences for Kickoff Meeting
+```{r firstmtg}
+first_mtg_data <- kickoff_data %>%
+  select(participant_id, first_mtg_social:first_mtg_other) %>%
+  gather(key = topic, value = yn, first_mtg_social:first_mtg_other) %>%
+  filter(yn == 1) %>%
+  mutate(topic = gsub('first_mtg_', '', topic),
+         mtg_topic = factor(ifelse(topic == 'social', 1,
+                            ifelse(topic == 'intro', 2,
+                            ifelse(topic == 'pkg', 3,
+                            ifelse(topic == 'stem', 4, 5)))),
+                            levels = 1:5,
+                            labels = c('Social/networking',
+                                       'Intro workshop',
+                                       'New package',
+                                       'Current STEM issues',
+                                       'Other')))
+
+ggplot(data = first_mtg_data, aes(x = mtg_topic)) +
+  geom_bar(aes(y = ..count..), alpha = 0.8) +
+  ggtitle('Ideas for First Meeting Topic') +
+  scale_x_discrete(name = '') +
+  scale_y_continuous(limits = c(0, nrow(kickoff_data)),
+                     breaks = seq(0, nrow(kickoff_data), 5),
+                     name = 'Count') +
+  theme(plot.title = element_text(hjust = 0))
+
+```
+
+### Ideas for "other" topics:
+```{r othertopics, results = 'asis'}
+other.topic.ideas <-
+  as.list(gsub('\n', ' ',
+               subset(kickoff_data, !is.na(first_meeting_other))$first_meeting_other,
+               fixed = TRUE))
+pander(other.topic.ideas)
+  
+```
+
+### Specific package ideas:
+```{r packagetopics, results = 'asis'}
+pkg.topic.ideas <-
+  as.list(gsub('\n', ' ',
+               subset(kickoff_data, !is.na(package_topic))$package_topic,
+               fixed = TRUE))
+pander(pkg.topic.ideas)
+  
+```
+
+# Meeting Venue Ideas
+```{r venues, results = 'asis'}
+venue.ideas <-
+  as.list(gsub('\n', ' ',
+               subset(kickoff_data, !is.na(meeting_venues))$meeting_venues,
+               fixed = TRUE))
+pander(venue.ideas)
+  
+```
+
+# R-Ladies Demographics
+```{r demographics}
+demog_data <- kickoff_data %>%
+  select(participant_id, experience_level, how_you_use) %>%
+  gather(key = characteristic, value = choice, experience_level:how_you_use) %>%
+  mutate(charac.f = factor(ifelse(characteristic == 'experience_level', 1, 2),
+                           levels = 1:2,
+                           labels = c('Experience Level', 'How do you plan to use R?')),
+         choice = ifelse(characteristic == 'how_you_use', choice + 4, choice),
+         choice.f = factor(choice,
+                           levels = 1:10,
+                           labels = c('Absolute beginner',
+                                      'Advanced beginner',
+                                      'Intermediate',
+                                      'Advanced',
+                                      'Medical:\nBiostats',
+                                      'Medical:\nClinician',
+                                      'Tech industry',
+                                      'Business',
+                                      'Government',
+                                      'Other')))
+
+ggplot(data = demog_data, aes(x = choice.f)) +
+  facet_wrap(~ charac.f, scales = 'free_x') +
+  geom_bar(aes(y = ..count..)) +
+  scale_x_discrete(name = '') +
+  scale_y_continuous(limits = c(0, nrow(kickoff_data)),
+                     breaks = seq(0, nrow(kickoff_data), 5),
+                     name = 'Count')
+
+```
+
+Thanks to our `r sum(kickoff_data$on_committee, na.rm = TRUE)` ladies who are interested in serving
+on the planning committee!
